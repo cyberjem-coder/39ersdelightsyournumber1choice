@@ -162,6 +162,23 @@
         }
         .customer-order-mode > header, .customer-order-mode > #public-sales-summary, .customer-order-mode > main, .customer-order-mode > #manager-pin-modal, .customer-order-mode > #admin-modal, .customer-order-mode > #audit-pin-modal, .customer-order-mode > #audit-modal, .customer-order-mode > #sheets-sync-pin-modal, .customer-order-mode > #sheets-sync-modal, .customer-order-mode > #toast-container, .customer-order-mode > #customer-qr-modal, .customer-order-mode > #incoming-mobile-orders-modal, .customer-order-mode > #mobile-order-review-modal { display:none !important; }
         .customer-order-mode { background:#100C0A !important; }
+        /* Customer QR ordering usability: isolated to customer-order-mode. */
+        .customer-qr-header { border:1px solid rgba(212,175,55,.38); background:linear-gradient(135deg,#211711,#120d0b); box-shadow:0 10px 28px rgba(0,0,0,.26); }
+        .customer-quick-checkout { position:sticky; top:0; z-index:45; display:flex; align-items:center; justify-content:space-between; gap:.75rem; padding:.7rem .85rem; border:1px solid rgba(212,175,55,.55); border-radius:1rem; background:rgba(26,20,18,.96); backdrop-filter:blur(14px); box-shadow:0 8px 22px rgba(0,0,0,.32); }
+        .customer-quick-checkout button { flex-shrink:0; border-radius:.8rem; padding:.7rem 1rem; background:#D4AF37; color:#100C0A; font-weight:800; font-size:.82rem; box-shadow:0 4px 14px rgba(212,175,55,.22); }
+        .customer-quick-checkout button:disabled { opacity:.42; box-shadow:none; }
+        .customer-category-tab { position:relative; flex:0 0 auto; border:1px solid rgba(212,175,55,.22); border-radius:999px; padding:.58rem .9rem; color:#e5e7eb; background:#261e1a; font-size:.72rem; font-weight:700; white-space:nowrap; transition:background .22s ease,color .22s ease,border-color .22s ease,transform .22s ease,box-shadow .22s ease; }
+        .customer-category-tab.is-active { color:#100C0A; border-color:#f2d36e; background:linear-gradient(135deg,#f2d36e,#D4AF37); box-shadow:0 4px 15px rgba(212,175,55,.26), inset 0 1px rgba(255,255,255,.36); transform:translateY(-2px) scale(1.025); animation:customer-tab-selected .22s ease-out; }
+        @keyframes customer-tab-selected { from{transform:translateY(2px) scale(.97);filter:brightness(.9)} to{transform:translateY(-2px) scale(1.025);filter:brightness(1)} }
+        .customer-category-tab.is-active::after { content:""; position:absolute; left:24%; right:24%; bottom:-5px; height:3px; border-radius:99px; background:#f8df8a; box-shadow:0 0 10px rgba(248,223,138,.8); }
+        .customer-item-card { border:1px solid rgba(212,175,55,.2); transition:border-color .2s ease,background .2s ease,box-shadow .2s ease,transform .2s ease; }
+        .customer-item-card.is-in-tray { border-color:rgba(245,207,91,.92); background:linear-gradient(135deg,rgba(212,175,55,.14),rgba(38,30,26,.84)); box-shadow:0 0 0 1px rgba(212,175,55,.22),0 7px 20px rgba(212,175,55,.10); }
+        .customer-added-flash { animation:customer-added-pulse .42s ease-out; }
+        @keyframes customer-added-pulse { 0%{transform:scale(.985);box-shadow:0 0 0 0 rgba(245,207,91,.55)} 65%{transform:scale(1.008);box-shadow:0 0 0 7px rgba(245,207,91,0)} 100%{transform:scale(1);box-shadow:0 0 0 0 rgba(245,207,91,0)} }
+        .customer-jingle-control { display:inline-flex; align-items:center; gap:.5rem; border:1px solid rgba(212,175,55,.42); border-radius:999px; padding:.48rem .78rem; background:rgba(16,12,10,.7); color:#f6d879; font-size:.72rem; font-weight:700; }
+        .customer-jingle-hint { min-height:1rem; color:#f4d88b; font-size:10px; }
+        @media (max-width:420px) { .customer-quick-checkout { padding:.6rem .65rem; } .customer-quick-checkout button { padding:.65rem .72rem; font-size:.75rem; } }
+        @media (prefers-reduced-motion: reduce) { .customer-category-tab,.customer-item-card { transition:none !important; } .customer-added-flash { animation:none !important; } }
     </style>
 </head>
 <body class="bg-mocha-900 text-gray-100 font-sans min-h-screen flex flex-col antialiased selection:bg-gold-500 selection:text-mocha-900">
@@ -1474,11 +1491,77 @@
                 refreshMobileOrders();
             } catch (error) { showToast(error.message, 'error'); }
         }
+        let customerJingleAudio = null;
+        let customerTapAudioContext = null;
+        function initCustomerJingle() {
+            customerJingleAudio = document.getElementById('cust-jingle');
+            if (!customerJingleAudio) return;
+            customerJingleAudio.volume = 0.42;
+            customerJingleAudio.addEventListener('playing', () => {
+                const button = document.getElementById('cust-jingle-toggle');
+                if (button) button.innerHTML = '<i class="fa-solid fa-pause"></i> Pause jingle';
+                const hint = document.getElementById('cust-audio-hint');
+                if (hint) hint.textContent = '39ers Delights jingle is playing.';
+            });
+            customerJingleAudio.addEventListener('pause', () => {
+                const button = document.getElementById('cust-jingle-toggle');
+                if (button) button.innerHTML = '<i class="fa-solid fa-volume-high"></i> Play jingle';
+            });
+            // Attempt playback on every fresh QR-menu visit. Phones may block sound until a tap.
+            const attempt = customerJingleAudio.play();
+            if (attempt && typeof attempt.catch === 'function') attempt.catch(() => {
+                const hint = document.getElementById('cust-audio-hint');
+                if (hint) hint.textContent = 'Your phone requires a tap before music can play. Tap “Play jingle”.';
+            });
+        }
+        function toggleCustomerJingle() {
+            if (!customerJingleAudio) customerJingleAudio = document.getElementById('cust-jingle');
+            if (!customerJingleAudio) return;
+            if (customerJingleAudio.paused) {
+                const attempt = customerJingleAudio.play();
+                if (attempt && typeof attempt.catch === 'function') attempt.catch(() => {
+                    const hint = document.getElementById('cust-audio-hint');
+                    if (hint) hint.textContent = 'Playback is blocked by your phone. Check silent mode and media volume.';
+                });
+            } else customerJingleAudio.pause();
+        }
+        function playCustomerTapSound() {
+            try {
+                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                if (!AudioContextClass) return;
+                if (!customerTapAudioContext) customerTapAudioContext = new AudioContextClass();
+                if (customerTapAudioContext.state === 'suspended') customerTapAudioContext.resume();
+                const oscillator = customerTapAudioContext.createOscillator();
+                const gain = customerTapAudioContext.createGain();
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(740, customerTapAudioContext.currentTime);
+                oscillator.frequency.exponentialRampToValueAtTime(520, customerTapAudioContext.currentTime + 0.055);
+                gain.gain.setValueAtTime(0.0001, customerTapAudioContext.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.035, customerTapAudioContext.currentTime + 0.008);
+                gain.gain.exponentialRampToValueAtTime(0.0001, customerTapAudioContext.currentTime + 0.075);
+                oscillator.connect(gain); gain.connect(customerTapAudioContext.destination);
+                oscillator.start(); oscillator.stop(customerTapAudioContext.currentTime + 0.08);
+            } catch (_) { /* Browser sound feedback is optional; ordering must always work. */ }
+        }
         function launchCustomerOrdering() {
             document.body.classList.add('customer-order-mode');
             const app = document.getElementById('customer-order-app');
             app.classList.remove('hidden');
-            app.innerHTML = `<div class="max-w-xl mx-auto space-y-4"><header class="rounded-2xl border border-gold-500/30 bg-mocha-800 p-4"><p class="text-xs text-gold-400">39ERS DELIGHTS</p><h1 class="text-2xl font-bold">Order from your phone</h1><p class="text-xs text-gray-400 mt-1">${escapeHtml(stationFromLink)} · Choose your drinks and food below.</p></header><div class="flex gap-2"><button id="cust-dine" onclick="setCustomerOrderMode('Dine-In')" class="flex-1 rounded-xl p-2 bg-gold-500 text-mocha-900 text-sm font-bold">Dine-In</button><button id="cust-takeout" onclick="setCustomerOrderMode('Takeout')" class="flex-1 rounded-xl p-2 bg-mocha-700 text-gray-200 text-sm font-bold">Takeout</button></div><input id="cust-search" oninput="renderCustomerMenu()" placeholder="Search menu…" class="w-full glass-input p-3 rounded-xl text-sm"><div id="cust-categories" class="flex gap-2 overflow-x-auto pb-1"></div><div id="cust-menu" class="space-y-3"><p class="text-xs text-gray-400">Loading menu…</p></div><section class="rounded-2xl border border-gold-500/30 bg-mocha-800 p-4 space-y-3"><h2 class="font-bold">Your tray <span id="cust-tray-count" class="text-gold-400">(0)</span></h2><div id="cust-tray" class="space-y-2 text-sm"></div><label class="block text-xs text-gray-300">Special notes (e.g., 50% sugar, extra pearls)</label><textarea id="cust-notes" rows="2" class="w-full glass-input p-3 rounded-xl text-sm" placeholder="Add order notes…"></textarea><p class="text-right text-lg font-bold text-gold-300" id="cust-total">₱0.00</p><button id="cust-submit" onclick="submitCustomerMobileOrder()" class="w-full rounded-xl bg-gold-500 text-mocha-900 p-3 font-bold">Submit Order</button><p id="cust-status" class="text-xs text-gray-400"></p></section></div>`;
+            app.innerHTML = `<div class="max-w-xl mx-auto space-y-4 pb-8">
+                <header class="customer-qr-header rounded-2xl p-4">
+                    <div class="flex items-center justify-between gap-3"><div><p class="text-xs text-gold-400 tracking-[.18em] font-bold">39ERS DELIGHTS</p><h1 class="text-2xl font-bold">Order from your phone</h1><p class="text-xs text-gray-400 mt-1">${escapeHtml(stationFromLink)} · Choose your drinks and food below.</p></div><div class="text-3xl text-gold-400"><i class="fa-solid fa-mug-hot"></i></div></div>
+                    <div class="mt-3 flex items-center gap-2"><button id="cust-jingle-toggle" type="button" onclick="toggleCustomerJingle();playCustomerTapSound()" class="customer-jingle-control"><i class="fa-solid fa-volume-high"></i> Play jingle</button><span class="text-[10px] text-gray-400">Store music</span></div>
+                    <p id="cust-audio-hint" class="customer-jingle-hint mt-1" aria-live="polite"></p>
+                    <audio id="cust-jingle" autoplay preload="auto" playsinline src="/assets/39ers-delights-jingle.mp3"></audio>
+                </header>
+                <div class="customer-quick-checkout"><div class="min-w-0"><p class="text-[10px] uppercase tracking-wider text-gray-400">Your tray</p><p class="font-bold text-gold-300"><span id="cust-top-count">0 items</span> · <span id="cust-top-total">₱0.00</span></p></div><button id="cust-top-submit" type="button" onclick="submitCustomerMobileOrder()" disabled><i class="fa-solid fa-bag-shopping mr-1"></i> Checkout</button></div>
+                <div class="flex gap-2"><button id="cust-dine" onclick="setCustomerOrderMode('Dine-In')" aria-pressed="true" class="flex-1 rounded-xl p-3 bg-gold-500 text-mocha-900 text-sm font-bold transition-all">Dine-In</button><button id="cust-takeout" onclick="setCustomerOrderMode('Takeout')" aria-pressed="false" class="flex-1 rounded-xl p-3 bg-mocha-700 text-gray-200 text-sm font-bold transition-all">Takeout</button></div>
+                <input id="cust-search" oninput="renderCustomerMenu()" placeholder="Search menu…" aria-label="Search menu" class="w-full glass-input p-3 rounded-xl text-sm">
+                <div id="cust-categories" class="flex gap-2 overflow-x-auto pb-2 pt-1" role="group" aria-label="Menu categories"></div>
+                <div id="cust-menu" class="space-y-3"><p class="text-xs text-gray-400">Loading menu…</p></div>
+                <section class="rounded-2xl border border-gold-500/30 bg-mocha-800 p-4 space-y-3" id="cust-tray-section"><h2 class="font-bold">Review your tray <span id="cust-tray-count" class="text-gold-400">(0)</span></h2><div id="cust-tray" class="space-y-2 text-sm"></div><label class="block text-xs text-gray-300">Special notes (e.g., 50% sugar, extra pearls)</label><textarea id="cust-notes" rows="2" class="w-full glass-input p-3 rounded-xl text-sm" placeholder="Add order notes…"></textarea><p class="text-right text-lg font-bold text-gold-300" id="cust-total">₱0.00</p><button id="cust-submit" onclick="submitCustomerMobileOrder()" class="w-full rounded-xl bg-gold-500 text-mocha-900 p-3 font-bold disabled:opacity-50" disabled>Submit Order</button><p id="cust-status" class="text-xs text-gray-400" aria-live="polite"></p></section>
+            </div>`;
+            initCustomerJingle();
             loadCustomerMenu();
         }
         let customerCategory = 'ALL';
@@ -1493,8 +1576,7 @@
                 customerMenuCatalog = Array.isArray(data.menu) ? data.menu : [];
                 if (!customerMenuCatalog.length) throw new Error('The store menu has not been published yet. Please ask the cashier to open the POS and publish the menu.');
                 customerCategory = 'ALL';
-                const cats = ['ALL', ...new Set(customerMenuCatalog.map(i => i.category).filter(Boolean))];
-                document.getElementById('cust-categories').innerHTML = cats.map(c => `<button onclick="customerCategory='${escapeHtml(c)}';renderCustomerMenu()" class="px-3 py-2 rounded-lg whitespace-nowrap text-xs ${c === customerCategory ? 'bg-gold-500 text-mocha-900' : 'bg-mocha-700 text-gray-200'}">${escapeHtml(c)}</button>`).join('');
+                renderCustomerCategoryTabs();
                 renderCustomerMenu();
                 renderCustomerTray();
                 if (customerMenuRefreshTimer) clearInterval(customerMenuRefreshTimer);
@@ -1503,12 +1585,26 @@
                 if (menuElement) menuElement.innerHTML = `<p class="text-rose-300 text-sm">Could not load menu: ${escapeHtml(error.message)}. Please ask the cashier.</p>`;
             }
         }
+        function renderCustomerCategoryTabs() {
+            const host = document.getElementById('cust-categories');
+            if (!host) return;
+            const categories = ['ALL', ...new Set(customerMenuCatalog.map(item => item.category).filter(Boolean))];
+            if (!categories.includes(customerCategory)) customerCategory = 'ALL';
+            host.innerHTML = categories.map(category => `<button type="button" data-category="${escapeHtml(category)}" aria-pressed="${category === customerCategory ? 'true' : 'false'}" class="customer-category-tab ${category === customerCategory ? 'is-active' : ''}" onclick="selectCustomerCategory(this.dataset.category)">${escapeHtml(category === 'ALL' ? 'ALL ITEMS' : category)}</button>`).join('');
+        }
+        function selectCustomerCategory(category) {
+            playCustomerTapSound();
+            customerCategory = category;
+            renderCustomerCategoryTabs();
+            renderCustomerMenu();
+        }
         async function refreshCustomerMenuAvailability() {
             try {
                 const response = await fetch('/api/mobile-menu', { cache: 'no-store' });
                 const data = await response.json().catch(() => ({}));
                 if (!response.ok || !data.ok || !Array.isArray(data.menu)) return false;
                 customerMenuCatalog = data.menu;
+                renderCustomerCategoryTabs();
                 renderCustomerMenu();
                 renderCustomerTray();
                 return true;
@@ -1538,18 +1634,24 @@
             menu.innerHTML = filtered.map(item => {
                 const soldOut = isCustomerItemSoldOut(item);
                 const remaining = getCustomerItemRemaining(item);
+                const inTrayQty = customerOrderCart.filter(line => String(line.itemId) === String(item.itemId)).reduce((sum, line) => sum + Number(line.qty || 0), 0);
                 const stockLabel = soldOut ? '<span class="rounded-full bg-rose-500/15 border border-rose-400/40 px-2 py-0.5 text-[9px] font-extrabold text-rose-300">SOLD OUT</span>'
                     : (item.stockTracked === true ? `<span class="text-[10px] text-amber-300">Available to add: ${Math.max(0, remaining)}</span>` : '');
-                return `<article class="rounded-xl border ${soldOut ? 'border-rose-400/40' : 'border-gold-500/20'} bg-mocha-800/70 p-3"><div class="flex items-start justify-between gap-2 mb-2"><div class="font-bold">${escapeHtml(item.itemName)} <span class="block text-[10px] text-gray-400 font-normal">${escapeHtml(item.category)}</span></div>${stockLabel}</div><div class="grid grid-cols-2 gap-2">${(item.variants || []).map((v, vi) => `<button ${soldOut || remaining <= 0 ? 'disabled aria-disabled="true"' : ''} onclick="addCustomerTrayItem('${escapeHtml(item.itemId)}',${vi})" class="text-left rounded-lg ${soldOut || remaining <= 0 ? 'bg-mocha-900/60 border border-rose-400/20 text-gray-500 cursor-not-allowed opacity-70' : 'bg-mocha-900 border border-gold-500/20'} p-2 text-xs"><span>${escapeHtml(v.name)}</span><strong class="block ${soldOut || remaining <= 0 ? 'text-gray-500' : 'text-gold-300'}">₱${Number(v.price).toFixed(2)}</strong></button>`).join('')}</div></article>`;
+                const trayLabel = inTrayQty ? `<span class="rounded-full bg-gold-500/15 border border-gold-400/40 px-2 py-0.5 text-[9px] font-extrabold text-gold-200">IN YOUR TRAY × ${inTrayQty}</span>` : '';
+                return `<article class="customer-item-card ${inTrayQty ? 'is-in-tray customer-added-flash' : ''} rounded-xl ${soldOut ? 'border-rose-400/40' : ''} bg-mocha-800/70 p-3"><div class="flex items-start justify-between gap-2 mb-2"><div class="font-bold">${escapeHtml(item.itemName)} <span class="block text-[10px] text-gray-400 font-normal">${escapeHtml(item.category)}</span></div><div class="flex flex-col items-end gap-1">${stockLabel}${trayLabel}</div></div><div class="grid grid-cols-2 gap-2">${(item.variants || []).map((v, vi) => `<button ${soldOut || remaining <= 0 ? 'disabled aria-disabled="true"' : ''} onclick="addCustomerTrayItem('${escapeHtml(item.itemId)}',${vi})" class="text-left rounded-lg ${soldOut || remaining <= 0 ? 'bg-mocha-900/60 border border-rose-400/20 text-gray-500 cursor-not-allowed opacity-70' : 'bg-mocha-900 border border-gold-500/20'} p-2 text-xs"><span>${escapeHtml(v.name)}</span><strong class="block ${soldOut || remaining <= 0 ? 'text-gray-500' : 'text-gold-300'}">₱${Number(v.price).toFixed(2)}</strong></button>`).join('')}</div></article>`;
             }).join('') || '<p class="text-xs text-gray-400">No items match your search.</p>';
         }
 
         function setCustomerOrderMode(mode) {
+            playCustomerTapSound();
             customerOrderMode = mode;
-            document.getElementById('cust-dine').className = `flex-1 rounded-xl p-2 ${mode === 'Dine-In' ? 'bg-gold-500 text-mocha-900' : 'bg-mocha-700 text-gray-200'} text-sm font-bold`;
-            document.getElementById('cust-takeout').className = `flex-1 rounded-xl p-2 ${mode === 'Takeout' ? 'bg-gold-500 text-mocha-900' : 'bg-mocha-700 text-gray-200'} text-sm font-bold`;
+            document.getElementById('cust-takeout').className = `flex-1 rounded-xl p-3 ${mode === 'Takeout' ? 'bg-gold-500 text-mocha-900 shadow-lg' : 'bg-mocha-700 text-gray-200'} text-sm font-bold transition-all`;
+            document.getElementById('cust-dine').className = `flex-1 rounded-xl p-3 ${mode === 'Dine-In' ? 'bg-gold-500 text-mocha-900 shadow-lg' : 'bg-mocha-700 text-gray-200'} text-sm font-bold transition-all`;
+            document.getElementById('cust-dine').setAttribute('aria-pressed', String(mode === 'Dine-In'));
+            document.getElementById('cust-takeout').setAttribute('aria-pressed', String(mode === 'Takeout'));
         }
         function addCustomerTrayItem(itemId, variantIndex) {
+            playCustomerTapSound();
             const item = customerMenuCatalog.find(i => String(i.itemId) === String(itemId));
             const variant = item?.variants?.[variantIndex];
             if (!item || !variant) return;
@@ -1575,10 +1677,21 @@
                 const unavailable = !item || isCustomerItemSoldOut(item);
                 return `<div class="flex items-center justify-between gap-2 border-b border-white/10 pb-2"><div><p>${escapeHtml(i.itemName)} <span class="text-gray-400">(${escapeHtml(i.variantName)})</span></p><p class="text-xs text-gold-300">₱${Number(i.price).toFixed(2)} × ${i.qty}</p>${unavailable ? '<p class="text-[10px] font-bold text-rose-300">SOLD OUT — remove this item</p>' : ''}</div><div class="flex gap-2"><button onclick="changeCustomerTrayQty(${n},-1)" class="px-2 rounded bg-mocha-700">−</button><button onclick="changeCustomerTrayQty(${n},1)" class="px-2 rounded bg-mocha-700">+</button></div></div>`;
             }).join('') || '<p class="text-xs text-gray-400">Your tray is empty.</p>';
-            document.getElementById('cust-tray-count').textContent = `(${customerOrderCart.reduce((n, i) => n + i.qty, 0)})`;
-            document.getElementById('cust-total').textContent = '₱' + customerOrderCart.reduce((n, i) => n + i.price * i.qty, 0).toFixed(2);
+            const itemCount = customerOrderCart.reduce((n, i) => n + i.qty, 0);
+            const total = customerOrderCart.reduce((n, i) => n + i.price * i.qty, 0);
+            document.getElementById('cust-tray-count').textContent = `(${itemCount})`;
+            document.getElementById('cust-total').textContent = '₱' + total.toFixed(2);
+            const topCount = document.getElementById('cust-top-count');
+            const topTotal = document.getElementById('cust-top-total');
+            const topButton = document.getElementById('cust-top-submit');
+            const bottomButton = document.getElementById('cust-submit');
+            if (topCount) topCount.textContent = `${itemCount} ${itemCount === 1 ? 'item' : 'items'}`;
+            if (topTotal) topTotal.textContent = '₱' + total.toFixed(2);
+            if (topButton) topButton.disabled = itemCount === 0;
+            if (bottomButton) bottomButton.disabled = itemCount === 0;
         }
         function changeCustomerTrayQty(index, delta) {
+            playCustomerTapSound();
             if (!customerOrderCart[index]) return;
             const line = customerOrderCart[index];
             if (delta > 0) {
@@ -1597,9 +1710,11 @@
         async function submitCustomerMobileOrder() {
             if (!customerOrderCart.length) { document.getElementById('cust-status').textContent = 'Please add at least one item.'; return; }
             const button = document.getElementById('cust-submit');
+            const topButton = document.getElementById('cust-top-submit');
             const status = document.getElementById('cust-status');
             if (button?.disabled) return;
             if (button) { button.disabled = true; button.textContent = 'Submitting…'; }
+            if (topButton) { topButton.disabled = true; topButton.textContent = 'Submitting…'; }
             const token = 'MO-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).slice(2, 6).toUpperCase();
             const code = String(Math.floor(1000 + Math.random() * 9000));
             const order = {
@@ -1655,6 +1770,7 @@
             } catch (error) {
                 status.textContent = `Could not submit order: ${error.message}. Please try again or show your tray to the cashier.`;
                 if (button) { button.disabled = false; button.textContent = 'Submit Order'; }
+                if (topButton) { topButton.disabled = customerOrderCart.length === 0; topButton.innerHTML = '<i class="fa-solid fa-bag-shopping mr-1"></i> Checkout'; }
             }
         }
 
